@@ -14,6 +14,7 @@ from roborock.devices.traits.v1.map_content import MapContent
 from homeassistant.components.roborock.const import V1_LOCAL_NOT_CLEANING_INTERVAL
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .conftest import FakeDevice, make_home_trait
@@ -244,3 +245,35 @@ async def test_q7_map_image_entity(
     q7 = next(device for device in fake_devices if device.name == "Roborock Q7")
     assert q7.b01_q7_properties is not None
     assert q7.b01_q7_properties.map_content.refresh.call_count >= 1
+
+
+async def test_q7_map_image_entity_refresh_failure(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    fake_q7_vacuum: FakeDevice,
+) -> None:
+    """Test Q7 image refresh failures are wrapped as HomeAssistantError."""
+    assert fake_q7_vacuum.b01_q7_properties is not None
+    fake_q7_vacuum.b01_q7_properties.map_content.refresh.side_effect = RoborockException()
+
+    entity = hass.data["image"].get_entity("image.roborock_q7_current_map")
+    assert entity is not None
+
+    with pytest.raises(HomeAssistantError, match="Something went wrong creating the map"):
+        await entity.async_image()
+
+
+async def test_q7_map_image_entity_no_image_content(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    fake_q7_vacuum: FakeDevice,
+) -> None:
+    """Test Q7 image entity errors when no image bytes are available."""
+    assert fake_q7_vacuum.b01_q7_properties is not None
+    fake_q7_vacuum.b01_q7_properties.map_content.image_content = None
+
+    entity = hass.data["image"].get_entity("image.roborock_q7_current_map")
+    assert entity is not None
+
+    with pytest.raises(HomeAssistantError, match="No map image content available"):
+        await entity.async_image()

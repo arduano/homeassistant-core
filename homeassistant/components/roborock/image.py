@@ -5,15 +5,17 @@ import logging
 
 from roborock.devices.traits.v1.home import HomeTrait
 from roborock.devices.traits.v1.map_content import MapContent
+from roborock.exceptions import RoborockException
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.util import dt as dt_util
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
+from .const import DOMAIN
 from .coordinator import (
     RoborockB01Q7UpdateCoordinator,
     RoborockConfigEntry,
@@ -117,6 +119,7 @@ class RoborockMap(RoborockCoordinatedEntityV1, ImageEntity):
             raise HomeAssistantError("Map flag not found in coordinator maps")
         return map_content.image_content
 
+
 class RoborockQ7Map(RoborockCoordinatedEntityB01Q7, ImageEntity):
     """Image entity for a Roborock Q7 current map."""
 
@@ -139,7 +142,14 @@ class RoborockQ7Map(RoborockCoordinatedEntityB01Q7, ImageEntity):
     async def async_image(self) -> bytes | None:
         """Fetch the current Q7 map image on demand."""
         map_content_trait = self.coordinator.api.map_content
-        await map_content_trait.refresh()
+        try:
+            await map_content_trait.refresh()
+        except RoborockException as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="map_failure",
+            ) from err
+
         if (image_content := map_content_trait.image_content) is None:
             raise HomeAssistantError("No map image content available")
         if self._cached_map != image_content:
