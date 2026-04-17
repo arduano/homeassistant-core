@@ -135,6 +135,7 @@ def create_b01_q7_trait() -> Mock:
     b01_trait = AsyncMock()
     b01_trait._props_data = deepcopy(Q7_B01_PROPS)
     b01_trait.map_content = AsyncMock()
+    b01_trait.map_content.image_content = b"\x89PNG-Q7"
     b01_trait.map_content.map_data = deepcopy(MAP_DATA)
     b01_trait.map_content.map_data.additional_parameters = {
         "room_names": {
