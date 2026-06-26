@@ -14,6 +14,7 @@ from roborock.devices.traits.v1.map_content import MapContent
 from homeassistant.components.roborock.const import V1_LOCAL_NOT_CLEANING_INTERVAL
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .conftest import FakeDevice, make_home_trait
@@ -45,7 +46,7 @@ async def test_floorplan_image(
     fake_devices: list[FakeDevice],
 ) -> None:
     """Test floor plan map image is correctly set up."""
-    assert len(hass.states.async_all("image")) == 4
+    assert len(hass.states.async_all("image")) == 5
 
     assert hass.states.get("image.roborock_s7_maxv_upstairs") is not None
     # Load the image on demand
@@ -130,7 +131,7 @@ async def test_map_status_change(
     fake_vacuum: FakeDevice,
 ) -> None:
     """Test floor plan map image is correctly updated on status change."""
-    assert len(hass.states.async_all("image")) == 4
+    assert len(hass.states.async_all("image")) == 5
 
     assert hass.states.get("image.roborock_s7_maxv_upstairs") is not None
     client = await hass_client()
@@ -176,6 +177,7 @@ async def test_map_status_change(
         (
             MULTI_MAP_LIST,
             {
+                "image.roborock_q7_current_map",
                 "image.roborock_s7_2_downstairs",
                 "image.roborock_s7_2_upstairs",
                 "image.roborock_s7_maxv_downstairs",
@@ -185,6 +187,7 @@ async def test_map_status_change(
         (
             MULTI_MAP_LIST_NO_MAP_NAMES,
             {
+                "image.roborock_q7_current_map",
                 "image.roborock_s7_2_downstairs",
                 "image.roborock_s7_2_upstairs",
                 # Expect default names based on map flags
@@ -221,3 +224,56 @@ async def test_image_entity_naming(
     assert {
         state.entity_id for state in hass.states.async_all("image")
     } == expected_entity_ids
+
+
+async def test_q7_map_image_entity(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    hass_client: ClientSessionGenerator,
+    fake_devices: list[FakeDevice],
+) -> None:
+    """Test B01/Q7 image entity is created and serves PNG bytes."""
+    client = await hass_client()
+    state = hass.states.get("image.roborock_q7_current_map")
+    assert state is not None
+
+    resp = await client.get("/api/image_proxy/image.roborock_q7_current_map")
+    assert resp.status == HTTPStatus.OK
+    body = await resp.read()
+    assert body == b"\x89PNG-Q7"
+
+    q7 = next(device for device in fake_devices if device.name == "Roborock Q7")
+    assert q7.b01_q7_properties is not None
+    assert q7.b01_q7_properties.map_content.refresh.call_count >= 1
+
+
+async def test_q7_map_image_entity_refresh_failure(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    fake_q7_vacuum: FakeDevice,
+) -> None:
+    """Test Q7 image refresh failures are wrapped as HomeAssistantError."""
+    assert fake_q7_vacuum.b01_q7_properties is not None
+    fake_q7_vacuum.b01_q7_properties.map_content.refresh.side_effect = RoborockException()
+
+    entity = hass.data["image"].get_entity("image.roborock_q7_current_map")
+    assert entity is not None
+
+    with pytest.raises(HomeAssistantError, match="Something went wrong creating the map"):
+        await entity.async_image()
+
+
+async def test_q7_map_image_entity_no_image_content(
+    hass: HomeAssistant,
+    setup_entry: MockConfigEntry,
+    fake_q7_vacuum: FakeDevice,
+) -> None:
+    """Test Q7 image entity errors when no image bytes are available."""
+    assert fake_q7_vacuum.b01_q7_properties is not None
+    fake_q7_vacuum.b01_q7_properties.map_content.image_content = None
+
+    entity = hass.data["image"].get_entity("image.roborock_q7_current_map")
+    assert entity is not None
+
+    with pytest.raises(HomeAssistantError, match="No map image content available"):
+        await entity.async_image()
